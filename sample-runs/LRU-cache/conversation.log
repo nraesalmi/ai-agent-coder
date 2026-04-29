@@ -1,0 +1,15 @@
+=== Coding Session Log ===
+Task: Implement a thread-safe LRU cache with configurable maximum entries and per-entry time‑to‑live (TTL). Must support get(key), put(key, value, ttl_seconds), and evict expired items automatically on access. Use an OrderedDict and timestamps. No external libraries.
+
+Make these changes: modify functions to return null
+
+Make these changes: now modify code to work normally again
+[Round 1] Coder: 1867 chars
+[Round 1] TestGen: 1308 chars
+[Round 1] Runner: FAILED - test_code.py::test_get_returns_value_when_key_exists_and_not_expired FAILED [ 20...
+[Round 2] Coder: 1453 chars
+[Round 2] TestGen: reused 1308 chars
+[Round 2] TestGen: 1308 chars
+[Round 2] Runner: PASSED
+Final rounds: 2
+Approved: True
