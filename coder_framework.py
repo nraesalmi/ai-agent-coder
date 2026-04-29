@@ -103,7 +103,7 @@ def create_dummy():
     )
 
 
-def run_coding_session(task: str, language: str = "python", max_rounds: int = 10, output_file: str = ""):
+def run_coding_session(task: str, language: str = "python", max_rounds: int = 10, output_file: str = "", ask_clarify: bool = True):
     output_file = output_file or ""
 
     if language not in CODE_TEMPLATES:
@@ -111,14 +111,69 @@ def run_coding_session(task: str, language: str = "python", max_rounds: int = 10
 
     code_manager = CodeManager()
     log_entries = []
+    task_with_context = task
+
+    # Agent 0: Clarifier - ask user clarifying questions
+    if ask_clarify:
+        print(f"\n=== Clarifying Task ===")
+        print(f"Task: {task}")
+        print(f"Language: {language}\n")
+        
+        clarifier = ConversableAgent(
+            name="Clarifier",
+            llm_config=get_llm_config(),
+            system_message="You help clarify coding tasks. Generate 2-4 specific questions about requirements, edge cases, error handling, or expected behavior.",
+            human_input_mode="NEVER",
+            max_consecutive_auto_reply=1,
+        )
+        
+        try:
+            # Generate questions
+            result = clarifier.initiate_chat(
+                recipient=create_dummy(),
+                message=f"Generate clarifying questions for: {task}",
+                max_turns=1,
+            )
+            
+            questions = ""
+            for m in result.chat_history:
+                c = m.get("content", "")
+                if c and "?" in c:
+                    questions = c
+                    break
+            if not questions:
+                for m in reversed(result.chat_history):
+                    c = m.get("content", "")
+                    if c and len(c) > 20:
+                        questions = c
+                        break
+            
+            if questions:
+                print(f"Clarifying questions:")
+                print(f"{questions[:500]}\n")
+                
+                # Get user answers via input
+                print("Your answers (or press Enter to skip):")
+                user_answers = input("> ")
+                
+                if user_answers.strip():
+                    task_with_context = f"{task}\n\nUser requirements: {user_answers}"
+                    print(f"\n(Including your requirements for the Coder)")
+                    log_entries.append(f"User requirements: {user_answers[:100]}...")
+                else:
+                    print(f"\n(Proceeding without additional clarifications)")
+                    log_entries.append(f"No clarifications provided")
+                
+        except Exception as e:
+            print(f"  Note: {e}")
+    
+    filepath = os.path.join(OUTPUT_DIR, output_file or CODE_FILE)
+    test_filepath = os.path.join(OUTPUT_DIR, TEST_FILE)
 
     print(f"\n=== 3-Agent Coder ===")
     print(f"Task: {task}")
     print(f"Language: {language}")
     print(f"Max Rounds: {max_rounds}\n")
-
-    filepath = os.path.join(OUTPUT_DIR, output_file or CODE_FILE)
-    test_filepath = os.path.join(OUTPUT_DIR, TEST_FILE)
 
     round_num = 1
     approved = False
@@ -136,10 +191,13 @@ def run_coding_session(task: str, language: str = "python", max_rounds: int = 10
             max_consecutive_auto_reply=1,
         )
 
+        # Use task with user clarifications if available
+        coder_task = task_with_context if 'task_with_context' in dir() and task_with_context else task
+        
         try:
             result = coder.initiate_chat(
                 recipient=create_dummy(),
-                message=f"Write complete code for: {task}\n\nLanguage: {language}\nOutput ONLY code:",
+                message=f"Write complete code for: {coder_task}\n\nLanguage: {language}\nOutput ONLY code:",
                 max_turns=1,
             )
 
@@ -242,9 +300,29 @@ def run_coding_session(task: str, language: str = "python", max_rounds: int = 10
                 log_entries.append(f"[Round {round_num}] Runner: PASSED")
             else:
                 print(f"  ✗ FAILED")
-                # Show first few lines of failure
-                error_lines = [l for l in output.split('\n') if l.strip()][:3]
-                log_entries.append(f"[Round {round_num}] Runner: FAILED - {error_lines}")
+                # Extract meaningful error info
+                error_msg = "Unknown error"
+                if output:
+                    lines = output.strip().split('\n')
+                    for line in lines:
+                        if "ModuleNotFoundError" in line:
+                            error_msg = f"Missing dependency: {line.split('ModuleNotFoundError')[0].strip()}"
+                            break
+                        elif "ImportError" in line:
+                            error_msg = f"Import error: {line.split('ImportError')[0].strip()}"
+                            break
+                        elif "SyntaxError" in line:
+                            error_msg = f"Syntax error"
+                            break
+                        elif "Error" in line and "File" in line:
+                            error_msg = f"File error in test_code.py"
+                            break
+                    if error_msg == "Unknown error" and failed:
+                        # Show the actual assertion/error
+                        error_msg = failed[0][:100] if failed else "Test assertion failed"
+                
+                log_entries.append(f"[Round {round_num}] Runner: FAILED - {error_msg}")
+                print(f"  Error: {error_msg}")
                 for f in failed[:2]:
                     print(f"    - {f[:80]}")
         else:
@@ -283,6 +361,7 @@ if __name__ == "__main__":
     parser.add_argument("--language", "-l", type=str, default="python")
     parser.add_argument("--max-rounds", "-r", type=int, default=10)
     parser.add_argument("--output", "-o", type=str, default=None)
+    parser.add_argument("--no-clarify", action="store_true", help="Skip clarifying questions")
 
     args = parser.parse_args()
 
@@ -290,7 +369,8 @@ if __name__ == "__main__":
         task=args.task,
         language=args.language,
         max_rounds=args.max_rounds,
-        output_file=args.output,
+        output_file=args.output or "",
+        ask_clarify=not args.no_clarify,
     )
 
     print(f"\n--- Code ---")
